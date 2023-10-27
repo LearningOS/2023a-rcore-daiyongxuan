@@ -15,10 +15,15 @@ mod switch;
 mod task;
 
 use crate::config::MAX_APP_NUM;
+use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time;
 use lazy_static::*;
 use switch::__switch;
+
+use crate::syscall::process::TaskInfo;
+
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
@@ -54,6 +59,8 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            syscall_times: [0; MAX_SYSCALL_NUM],
+            last_syscall_time: 0,
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -135,6 +142,27 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// update syscall time once
+    fn update_syscall_times(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current_app_num = inner.current_task;
+        inner.tasks[current_app_num].syscall_times[syscall_id] += 1;
+        inner.tasks[current_app_num].last_syscall_time = get_time() - inner.tasks[current_app_num].last_syscall_time;
+    }
+    fn query_task_info(&self, _ti: *mut TaskInfo) {
+        let inner = self.inner.exclusive_access();
+        let current_app_num = inner.current_task;
+        let current_status = inner.tasks[current_app_num].task_status;
+        let current_syscall_nums = inner.tasks[current_app_num].syscall_times.clone();
+        let last_syscall_time = inner.tasks[current_app_num].last_syscall_time.clone();
+        unsafe {
+            let ti_ref = &mut *_ti;
+            ti_ref.status = current_status;
+            ti_ref.syscall_times = current_syscall_nums;
+            ti_ref.time = last_syscall_time;
+        }
+    }   
 }
 
 /// Run the first task in task list.
@@ -168,4 +196,14 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// update syscall times
+pub fn update_syscall_times(syscall_id: usize) {
+    TASK_MANAGER.update_syscall_times(syscall_id);
+}
+
+/// query_task_info
+pub fn query_task_info(_ti: *mut TaskInfo) {
+    TASK_MANAGER.query_task_info(_ti);
 }

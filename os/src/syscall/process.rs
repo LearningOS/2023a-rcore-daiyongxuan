@@ -5,10 +5,13 @@ use crate::{
     timer::get_time_us,
 };
 
+/// Time structure
 #[repr(C)]
 #[derive(Debug)]
 pub struct TimeVal {
+    /// sec
     pub sec: usize,
+    /// usec
     pub usec: usize,
 }
 
@@ -16,11 +19,11 @@ pub struct TimeVal {
 #[allow(dead_code)]
 pub struct TaskInfo {
     /// Task status in it's life cycle
-    status: TaskStatus,
+    pub status: TaskStatus,
     /// The numbers of syscall called by task
-    syscall_times: [u32; MAX_SYSCALL_NUM],
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
     /// Total running time of task
-    time: usize,
+    pub time: usize,
 }
 
 /// task exits and submit an exit code
@@ -49,9 +52,10 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     }
     0
 }
-
+use crate::task::query_task_info;
 /// YOUR JOB: Finish sys_task_info to pass testcases
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info");
-    -1
+    query_task_info(_ti);
+    0
 }
