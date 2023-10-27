@@ -18,7 +18,7 @@ use crate::config::MAX_APP_NUM;
 use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
-use crate::timer::get_time;
+use crate::timer::get_time_ms;
 use lazy_static::*;
 use switch::__switch;
 
@@ -61,6 +61,7 @@ lazy_static! {
             task_status: TaskStatus::UnInit,
             syscall_times: [0; MAX_SYSCALL_NUM],
             last_syscall_time: 0,
+            first_schedule_time: 0,
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -88,6 +89,7 @@ impl TaskManager {
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
+        task0.first_schedule_time = get_time_ms();
         drop(inner);
         let mut _unused = TaskContext::zero_init();
         // before this, we should drop local variables that must be dropped manually
@@ -132,6 +134,10 @@ impl TaskManager {
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
+            // update the first scheduled time
+            if inner.tasks[next].first_schedule_time == 0 {
+                inner.tasks[next].first_schedule_time = get_time_ms();
+            }
             drop(inner);
             // before this, we should drop local variables that must be dropped manually
             unsafe {
@@ -148,19 +154,19 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let current_app_num = inner.current_task;
         inner.tasks[current_app_num].syscall_times[syscall_id] += 1;
-        inner.tasks[current_app_num].last_syscall_time = get_time() - inner.tasks[current_app_num].last_syscall_time;
+        inner.tasks[current_app_num].last_syscall_time = get_time_ms();
     }
     fn query_task_info(&self, _ti: *mut TaskInfo) {
         let inner = self.inner.exclusive_access();
         let current_app_num = inner.current_task;
         let current_status = inner.tasks[current_app_num].task_status;
         let current_syscall_nums = inner.tasks[current_app_num].syscall_times.clone();
-        let last_syscall_time = inner.tasks[current_app_num].last_syscall_time.clone();
+        let first_scheduled_time = inner.tasks[current_app_num].first_schedule_time.clone();
         unsafe {
             let ti_ref = &mut *_ti;
             ti_ref.status = current_status;
             ti_ref.syscall_times = current_syscall_nums;
-            ti_ref.time = last_syscall_time;
+            ti_ref.time = get_time_ms() - first_scheduled_time;
         }
     }   
 }
