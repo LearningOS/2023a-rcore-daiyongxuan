@@ -1,6 +1,6 @@
 //! Process management syscalls
 use core::mem::size_of;
-use crate::mm::translated_byte_buffer;
+use crate::mm::{translated_byte_buffer, VirtAddr};
 
 use crate::timer::get_time_us;
 use crate::{
@@ -9,6 +9,8 @@ use crate::{
         change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token,
     },
 };
+
+use crate::task::map_a_piece_of_virtal_address;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -73,8 +75,9 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+    trace!("kernel: sys_mmap!");
+    map_a_piece_of_virtal_address(VirtAddr::from(_start), _len, _port);
+    0
 }
 
 // YOUR JOB: Implement munmap.

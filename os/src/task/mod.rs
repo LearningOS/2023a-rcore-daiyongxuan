@@ -24,6 +24,8 @@ pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
 
+use crate::mm::{VirtAddr, MapPermission};
+
 /// The task manager, where all the tasks are managed.
 ///
 /// Functions implemented on `TaskManager` deals with all task state transitions
@@ -153,6 +155,15 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// alloc a piece of virtual address, implemented in TaskManager
+    pub fn map_a_piece_of_virtal_address(&self ,start_va: VirtAddr, len: usize, port: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let mut permission = MapPermission::from_bits((port << 1) as u8).unwrap();
+        permission = permission.union(MapPermission::U);
+        inner.tasks[current].memory_set.insert_framed_area(start_va, VirtAddr::from(usize::from(start_va) + len), permission);
+    }
 }
 
 /// Run the first task in task list.
@@ -201,4 +212,12 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// For syscall map, this func will map a piece of virtual address
+/// for current running process
+/// The param of this func is start virtual address, length of alloc 
+/// virtual address, and permisson
+pub fn map_a_piece_of_virtal_address(start_va: VirtAddr, len: usize, port: usize) {
+    TASK_MANAGER.map_a_piece_of_virtal_address(start_va, len, port);
 }
