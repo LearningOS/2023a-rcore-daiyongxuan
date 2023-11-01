@@ -1,8 +1,12 @@
 //! Process management syscalls
+use core::mem::size_of;
+use crate::mm::translated_byte_buffer;
+
+use crate::timer::get_time_us;
 use crate::{
     config::MAX_SYSCALL_NUM,
     task::{
-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus,
+        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token,
     },
 };
 
@@ -43,7 +47,20 @@ pub fn sys_yield() -> isize {
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    -1
+    // _ts is in the virtual address, so we can not modify
+    // it directly. we should translate it into kernel virtual
+    // address. And beacause kernel virtual address is eqaul to
+    // physical address, so we can use translated_byte_buffer 
+    let _ts_translated = translated_byte_buffer(current_user_token(), _ts as *mut u8, size_of::<TimeVal>());
+    let _trans_to_timeval = _ts_translated[0].as_ptr() as *mut u8 as *mut TimeVal;
+    let current_time = get_time_us();
+    unsafe {
+        *_trans_to_timeval = TimeVal {
+            sec: current_time / 1_000_000,
+            usec: current_time % 1_000_000,
+        }
+    };
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
