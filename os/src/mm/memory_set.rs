@@ -57,11 +57,22 @@ impl MemorySet {
         start_va: VirtAddr,
         end_va: VirtAddr,
         permission: MapPermission,
-    ) {
+    ) -> Result<(), ()>{
+        if start_va > end_va {
+            return Err(())
+        }
+        for mapped_area in self.areas.iter() {
+            let start_vaddr = mapped_area.vpn_range.get_start().0 << 12;
+            let end_vaddr = mapped_area.vpn_range.get_end().0 << 12;
+            if !(start_va.0 >= end_vaddr || end_va.0 <= start_vaddr) {
+                return Err(())
+            }
+        }
         self.push(
             MapArea::new(start_va, end_va, MapType::Framed, permission),
             None,
         );
+        Ok(())
     }
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);

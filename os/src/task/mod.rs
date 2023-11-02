@@ -157,12 +157,12 @@ impl TaskManager {
     }
 
     /// alloc a piece of virtual address, implemented in TaskManager
-    pub fn map_a_piece_of_virtal_address(&self ,start_va: VirtAddr, len: usize, port: usize) {
+    pub fn map_a_piece_of_virtal_address(&self ,start_va: VirtAddr, len: usize, port: usize) -> Result<(), ()>{
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         let mut permission = MapPermission::from_bits((port << 1) as u8).unwrap();
         permission = permission.union(MapPermission::U);
-        inner.tasks[current].memory_set.insert_framed_area(start_va, VirtAddr::from(usize::from(start_va) + len), permission);
+        inner.tasks[current].memory_set.insert_framed_area(start_va, VirtAddr::from(usize::from(start_va) + len), permission)
     }
 }
 
@@ -218,6 +218,6 @@ pub fn change_program_brk(size: i32) -> Option<usize> {
 /// for current running process
 /// The param of this func is start virtual address, length of alloc 
 /// virtual address, and permisson
-pub fn map_a_piece_of_virtal_address(start_va: VirtAddr, len: usize, port: usize) {
-    TASK_MANAGER.map_a_piece_of_virtal_address(start_va, len, port);
+pub fn map_a_piece_of_virtal_address(start_va: VirtAddr, len: usize, port: usize) -> Result<(), ()> {
+    TASK_MANAGER.map_a_piece_of_virtal_address(start_va, len, port)
 }

@@ -76,8 +76,11 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     trace!("kernel: sys_mmap!");
-    map_a_piece_of_virtal_address(VirtAddr::from(_start), _len, _port);
-    0
+    let map_result = map_a_piece_of_virtal_address(VirtAddr::from(_start), _len, _port);
+    match map_result {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
 }
 
 // YOUR JOB: Implement munmap.
