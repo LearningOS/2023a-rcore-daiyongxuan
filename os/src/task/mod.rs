@@ -26,6 +26,10 @@ pub use context::TaskContext;
 
 use crate::mm::{VirtAddr, MapPermission};
 
+use crate::syscall::process::TaskInfo;
+
+use crate::timer::get_time_ms;
+
 /// The task manager, where all the tasks are managed.
 ///
 /// Functions implemented on `TaskManager` deals with all task state transitions
@@ -145,6 +149,10 @@ impl TaskManager {
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
+            // update the first scheduled time
+            if inner.tasks[next].first_schedule_time == 0 {
+                inner.tasks[next].first_schedule_time = get_time_ms();
+            }
             drop(inner);
             // before this, we should drop local variables that must be dropped manually
             unsafe {
@@ -166,6 +174,26 @@ impl TaskManager {
         }
         permission = permission.union(MapPermission::U);
         inner.tasks[current].memory_set.insert_framed_area(start_va, VirtAddr::from(usize::from(start_va) + len), permission)
+    }
+    fn query_task_info(&self, _ti: *mut TaskInfo) {
+        let inner = self.inner.exclusive_access();
+        let current_app_num = inner.current_task;
+        let current_status = inner.tasks[current_app_num].task_status;
+        let current_syscall_nums = inner.tasks[current_app_num].syscall_times.clone();
+        let first_scheduled_time = inner.tasks[current_app_num].first_schedule_time.clone();
+        unsafe {
+            let ti_ref = &mut *_ti;
+            ti_ref.status = current_status;
+            ti_ref.syscall_times = current_syscall_nums;
+            ti_ref.time = get_time_ms() - first_scheduled_time;
+        }
+    }
+    /// update syscall time once
+    fn update_syscall_times(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current_app_num = inner.current_task;
+        inner.tasks[current_app_num].syscall_times[syscall_id] += 1;
+        inner.tasks[current_app_num].last_syscall_time = get_time_ms();
     }
 
     ///
@@ -235,4 +263,14 @@ pub fn map_a_piece_of_virtal_address(start_va: VirtAddr, len: usize, port: usize
 ///
 pub fn unmap_area(start_va: VirtAddr, len: usize) -> Result<(), ()> {
     TASK_MANAGER.ummap_area(start_va, len)
+}
+
+/// query_task_info
+pub fn query_task_info(_ti: *mut TaskInfo) {
+    TASK_MANAGER.query_task_info(_ti);
+}
+
+/// update syscall times
+pub fn update_syscall_times(syscall_id: usize) {
+    TASK_MANAGER.update_syscall_times(syscall_id);
 }

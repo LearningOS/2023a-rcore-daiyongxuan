@@ -80,21 +80,55 @@ impl MemorySet {
     
     /// ummap a piece of virtual address
     pub fn unmap_area(&mut self, _start: VirtAddr, _len: usize) -> Result<(), ()> {
-        let mut start_vpn = _start.floor();
-        let mut end_vpn = VirtAddr::from(usize::from(_start) + _len).ceil();
+        if usize::from(_start) % PAGE_SIZE != 0 {
+            return Err(());
+        }
+        let start_vpn = _start.floor();
+        let end_vpn = VirtAddr::from(usize::from(_start) + _len).ceil();
         let mut deleted_areas = Vec::new();
+        // check if there is unmapped page need to be ummap
+        let capacity = end_vpn.0 - start_vpn.0;
+        let mut need_unmapped = Vec::new();
+        for _ in 0..capacity {
+            need_unmapped.push(false);
+        }
+        let _ = need_unmapped.iter_mut().map(|v| *v = false);
+        for area in self.areas.iter() {
+            let area_start_vpn = area.vpn_range.get_start();
+            let area_end_vpn = area.vpn_range.get_end();
+            if area_start_vpn >= start_vpn && area_end_vpn <= end_vpn {
+                for i in usize::from(area_start_vpn)..usize::from(area_end_vpn) {
+                    need_unmapped[i-start_vpn.0] = true;
+                }
+            } else if area_start_vpn >= start_vpn && area_start_vpn < end_vpn {
+                for i in area_start_vpn.0..end_vpn.0 {
+                    need_unmapped[i-start_vpn.0] = true;
+                }
+            } else if start_vpn < area_end_vpn && area_end_vpn <= end_vpn {
+                for i in start_vpn.0..area_end_vpn.0 {
+                    need_unmapped[i-start_vpn.0] = true;
+                }
+            }
+        }
+        for i in need_unmapped {
+            if i == false {
+                return Err(());
+            }
+        }
         for (index, area) in self.areas.iter_mut().enumerate() {
             let area_start_vpn = area.vpn_range.get_start();
             let area_end_vpn = area.vpn_range.get_end();
             if area_start_vpn >= start_vpn && area_end_vpn <= end_vpn {
                 area.unmap(&mut self.page_table);
                 deleted_areas.push(index);
-            } else if area_start_vpn <= start_vpn && area_end_vpn < end_vpn {
-                end_vpn.step();
-                area.shrink_to_start(&mut self.page_table, end_vpn);
+            } else if area_start_vpn >= start_vpn && area_start_vpn < end_vpn {
+                let mut new_start = end_vpn;
+                new_start.step();
+                area.shrink_to_start(&mut self.page_table, new_start);
             } else if start_vpn < area_end_vpn && area_end_vpn <= end_vpn {
-                start_vpn.0 -= 1;
-                area.shrink_to(&mut self.page_table, start_vpn);
+                let mut new_end = start_vpn;
+                new_end.0 -= 1;
+                area.shrink_to(&mut self.page_table, new_end);
             }
         }
         deleted_areas.reverse();

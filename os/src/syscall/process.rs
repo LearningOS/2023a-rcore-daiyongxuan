@@ -1,5 +1,6 @@
 //! Process management syscalls
 use core::mem::size_of;
+
 use crate::mm::{translated_byte_buffer, VirtAddr};
 
 use crate::timer::get_time_us;
@@ -10,24 +11,28 @@ use crate::{
     },
 };
 
-use crate::task::{map_a_piece_of_virtal_address, unmap_area};
+use crate::task::{map_a_piece_of_virtal_address, unmap_area, query_task_info};
 
 #[repr(C)]
 #[derive(Debug)]
+/// Timeval
 pub struct TimeVal {
+    /// sec
     pub sec: usize,
+    /// usec
     pub usec: usize,
 }
 
 /// Task information
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct TaskInfo {
     /// Task status in it's life cycle
-    status: TaskStatus,
+    pub status: TaskStatus,
     /// The numbers of syscall called by task
-    syscall_times: [u32; MAX_SYSCALL_NUM],
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
     /// Total running time of task
-    time: usize,
+    pub time: usize,
 }
 
 /// task exits and submit an exit code
@@ -69,11 +74,24 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-    trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
-    -1
+    trace!("kernel: sys_task_info!");
+    let _ti_translated = translated_byte_buffer(current_user_token(), _ti as *mut u8, size_of::<TaskInfo>());
+    let _trans_to_taskinfo = _ti_translated[0].as_ptr() as *mut TaskInfo;
+    let mut cur_task_info = TaskInfo {
+        status: TaskStatus::Running,
+        syscall_times: [0; MAX_SYSCALL_NUM],
+        time: 0,
+    };
+    query_task_info(&mut cur_task_info);
+    unsafe {
+        *_trans_to_taskinfo = TaskInfo {
+            ..cur_task_info
+        };
+    }
+    0
 }
 
-// YOUR JOB: Implement mmap.
+/// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     trace!("kernel: sys_mmap!");
     let map_result = map_a_piece_of_virtal_address(VirtAddr::from(_start), _len, _port);
@@ -83,7 +101,7 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     }
 }
 
-// YOUR JOB: Implement munmap.
+/// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     trace!("kernel: sys_munmap!");
     let unmap_result = unmap_area(VirtAddr::from(_start), _len);
