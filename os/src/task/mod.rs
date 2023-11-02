@@ -28,7 +28,7 @@ use crate::mm::{VirtAddr, MapPermission};
 
 use crate::syscall::process::TaskInfo;
 
-use crate::timer::get_time_ms;
+use crate::timer::get_time_us;
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -86,6 +86,7 @@ impl TaskManager {
         let next_task = &mut inner.tasks[0];
         next_task.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
+        next_task.first_schedule_time = get_time_us();
         drop(inner);
         let mut _unused = TaskContext::zero_init();
         // before this, we should drop local variables that must be dropped manually
@@ -151,7 +152,7 @@ impl TaskManager {
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             // update the first scheduled time
             if inner.tasks[next].first_schedule_time == 0 {
-                inner.tasks[next].first_schedule_time = get_time_ms();
+                inner.tasks[next].first_schedule_time = get_time_us();
             }
             drop(inner);
             // before this, we should drop local variables that must be dropped manually
@@ -181,11 +182,12 @@ impl TaskManager {
         let current_status = inner.tasks[current_app_num].task_status;
         let current_syscall_nums = inner.tasks[current_app_num].syscall_times.clone();
         let first_scheduled_time = inner.tasks[current_app_num].first_schedule_time.clone();
+        println!("first schedule time: {}", first_scheduled_time);
         unsafe {
             let ti_ref = &mut *_ti;
             ti_ref.status = current_status;
             ti_ref.syscall_times = current_syscall_nums;
-            ti_ref.time = get_time_ms() - first_scheduled_time;
+            ti_ref.time = (get_time_us() - first_scheduled_time) / 1_000;
         }
     }
     /// update syscall time once
@@ -193,7 +195,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let current_app_num = inner.current_task;
         inner.tasks[current_app_num].syscall_times[syscall_id] += 1;
-        inner.tasks[current_app_num].last_syscall_time = get_time_ms();
+        inner.tasks[current_app_num].last_syscall_time = get_time_us();
     }
 
     ///

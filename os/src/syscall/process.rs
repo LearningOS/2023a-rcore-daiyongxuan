@@ -83,6 +83,7 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
         time: 0,
     };
     query_task_info(&mut cur_task_info);
+    println!("time: {}", cur_task_info.time);
     unsafe {
         *_trans_to_taskinfo = TaskInfo {
             ..cur_task_info
