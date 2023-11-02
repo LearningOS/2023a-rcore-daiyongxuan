@@ -161,6 +161,9 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         let mut permission = MapPermission::from_bits((port << 1) as u8).unwrap();
+        if permission.is_empty() || permission.contains(MapPermission::U){
+            return Err(())
+        }
         permission = permission.union(MapPermission::U);
         inner.tasks[current].memory_set.insert_framed_area(start_va, VirtAddr::from(usize::from(start_va) + len), permission)
     }

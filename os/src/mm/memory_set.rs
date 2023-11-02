@@ -61,6 +61,9 @@ impl MemorySet {
         if start_va > end_va {
             return Err(())
         }
+        if usize::from(start_va) % PAGE_SIZE != 0 {
+            return Err(())
+        }
         for mapped_area in self.areas.iter() {
             let start_vaddr = mapped_area.vpn_range.get_start().0 << 12;
             let end_vaddr = mapped_area.vpn_range.get_end().0 << 12;
