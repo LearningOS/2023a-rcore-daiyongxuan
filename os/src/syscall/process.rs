@@ -10,7 +10,7 @@ use crate::{
     },
 };
 
-use crate::task::map_a_piece_of_virtal_address;
+use crate::task::{map_a_piece_of_virtal_address, unmap_area};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -85,8 +85,12 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+    trace!("kernel: sys_munmap!");
+    let unmap_result = unmap_area(VirtAddr::from(_start), _len);
+    match unmap_result {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {

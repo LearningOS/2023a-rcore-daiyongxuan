@@ -167,6 +167,13 @@ impl TaskManager {
         permission = permission.union(MapPermission::U);
         inner.tasks[current].memory_set.insert_framed_area(start_va, VirtAddr::from(usize::from(start_va) + len), permission)
     }
+
+    ///
+    pub fn ummap_area(&self, start_va: VirtAddr, len: usize) -> Result<(), ()> {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].memory_set.unmap_area(start_va, len)
+    }
 }
 
 /// Run the first task in task list.
@@ -223,4 +230,9 @@ pub fn change_program_brk(size: i32) -> Option<usize> {
 /// virtual address, and permisson
 pub fn map_a_piece_of_virtal_address(start_va: VirtAddr, len: usize, port: usize) -> Result<(), ()> {
     TASK_MANAGER.map_a_piece_of_virtal_address(start_va, len, port)
+}
+
+///
+pub fn unmap_area(start_va: VirtAddr, len: usize) -> Result<(), ()> {
+    TASK_MANAGER.ummap_area(start_va, len)
 }
