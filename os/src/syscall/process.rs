@@ -1,6 +1,8 @@
 //! Process management syscalls
 use alloc::sync::Arc;
-
+use crate::mm::translated_byte_buffer;
+use crate::timer::get_time_us;
+use core::mem::size_of;
 use crate::{
     config::MAX_SYSCALL_NUM,
     loader::get_app_data_by_name,
@@ -90,11 +92,20 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    // _ts is in the virtual address, so we can not modify
+    // it directly. we should translate it into kernel virtual
+    // address. And beacause kernel virtual address is eqaul to
+    // physical address, so we can use translated_byte_buffer 
+    let _ts_translated = translated_byte_buffer(current_user_token(), _ts as *mut u8, size_of::<TimeVal>());
+    let _trans_to_timeval = _ts_translated[0].as_ptr() as *mut u8 as *mut TimeVal;
+    let current_time = get_time_us();
+    unsafe {
+        *_trans_to_timeval = TimeVal {
+            sec: current_time / 1_000_000,
+            usec: current_time % 1_000_000,
+        }
+    };
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
@@ -185,8 +196,15 @@ pub fn sys_spawn(_path: *const u8) -> isize {
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority!",
         current_task().unwrap().pid.0
     );
-    -1
+    println!("Enter in set prio");
+    if _prio <= 1 {
+        return -1;
+    }
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    inner.prio = _prio as usize;
+    _prio
 }
