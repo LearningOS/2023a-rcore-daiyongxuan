@@ -8,7 +8,7 @@ use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
-
+use crate::mm::MapPermission;
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
@@ -33,6 +33,16 @@ impl TaskControlBlock {
     pub fn get_user_token(&self) -> usize {
         let inner = self.inner_exclusive_access();
         inner.memory_set.token()
+    }
+    /// alloc a piece of virtual address, implemented in TaskManager
+    pub fn map_a_piece_of_virtal_address(&self ,start_va: VirtAddr, len: usize, port: usize) -> Result<(), ()>{
+        let mut inner = self.inner.exclusive_access();
+        let mut permission = MapPermission::from_bits((port << 1) as u8).unwrap();
+        if permission.is_empty() || permission.contains(MapPermission::U){
+            return Err(())
+        }
+        permission = permission.union(MapPermission::U);
+        inner.memory_set.insert_framed_area(start_va, VirtAddr::from(usize::from(start_va) + len), permission)
     }
 }
 

@@ -125,7 +125,12 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let current_task = current_task().unwrap();
+    match current_task.map_a_piece_of_virtal_address(_start.into(), _len, _port)  {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
+
 }
 
 /// YOUR JOB: Implement munmap.
