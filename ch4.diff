@@ -1,0 +1,649 @@
+diff --git a/ci-user b/ci-user
+new file mode 160000
+index 0000000..1a9ff29
+--- /dev/null
++++ b/ci-user
+@@ -0,0 +1 @@
++Subproject commit 1a9ff29170fabf3ca055291810810d8a0a86a94e
+diff --git a/os/.vscode/launch.json b/os/.vscode/launch.json
+new file mode 100644
+index 0000000..514f0b2
+--- /dev/null
++++ b/os/.vscode/launch.json
+@@ -0,0 +1,19 @@
++{
++    // Use IntelliSense to learn about possible attributes.
++    // Hover to view descriptions of existing attributes.
++    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
++    "version": "0.2.0",
++    "configurations": [
++        {
++            "name": "(gdb-multiarch) Launch",
++            "type": "cppdbg",
++            "request": "launch",
++            "program": "${workspaceFolder}/target/riscv64gc-unknown-none-elf/release/os",
++            "cwd": "${workspaceFolder}",
++            "MIMode": "gdb",
++            "miDebuggerPath": "gdb-multiarch",
++            "miDebuggerArgs": "-ex 'set arch riscv:rv64'",
++            "miDebuggerServerAddress": "localhost:1234"
++        }
++    ]
++  }
+\ No newline at end of file
+diff --git a/os/.vscode/settings.json b/os/.vscode/settings.json
+new file mode 100644
+index 0000000..6a40655
+--- /dev/null
++++ b/os/.vscode/settings.json
+@@ -0,0 +1,13 @@
++{
++    // Prevent "can't find crate for `test`" error on no_std
++    // Ref: https://github.com/rust-lang/vscode-rust/issues/729
++    // For vscode-rust plugin users:
++    "rust.target": "riscv64gc-unknown-none-elf",
++    "rust.all_targets": false,
++    // For Rust Analyzer plugin users:
++    "rust-analyzer.cargo.target": "riscv64gc-unknown-none-elf",
++    "rust-analyzer.checkOnSave.allTargets": false,
++    // "rust-analyzer.cargo.features": [
++    //     "board_qemu"
++    // ]
++}
+\ No newline at end of file
+diff --git a/os/Makefile b/os/Makefile
+index 8aab998..4f2a794 100644
+--- a/os/Makefile
++++ b/os/Makefile
+@@ -2,79 +2,23 @@
+ TARGET := riscv64gc-unknown-none-elf
+ MODE := release
+ KERNEL_ELF := target/$(TARGET)/$(MODE)/os
+-KERNEL_BIN := $(KERNEL_ELF).bin
+-DISASM_TMP := target/$(TARGET)/$(MODE)/asm
+ 
+ # BOARD
+-BOARD := qemu
++BOARD ?= qemu
+ SBI ?= rustsbi
+ BOOTLOADER := ../bootloader/$(SBI)-$(BOARD).bin
+ 
+-# Building mode argument
+-ifeq ($(MODE), release)
+-	MODE_ARG := --release
+-endif
+-
+-# KERNEL ENTRY
+-KERNEL_ENTRY_PA := 0x80200000
+-
+-# Binutils
+-OBJDUMP := rust-objdump --arch-name=riscv64
+-OBJCOPY := rust-objcopy --binary-architecture=riscv64
+-
+-CHAPTER ?= $(shell git rev-parse --abbrev-ref HEAD | sed -E 's/ch([0-9])/\1/')
+-TEST ?= $(CHAPTER)
+-BASE ?= 1
+-
+-# Disassembly
+-DISASM ?= -x
+-
+-build: env $(KERNEL_BIN)
+-
+-env:
+-	(rustup target list | grep "riscv64gc-unknown-none-elf (installed)") || rustup target add $(TARGET)
+-	cargo install cargo-binutils
+-	rustup component add rust-src
+-	rustup component add llvm-tools-preview
+-
+-$(KERNEL_BIN): kernel
+-	@$(OBJCOPY) $(KERNEL_ELF) --strip-all -O binary $@
+-
+ kernel:
+-	@make -C ../user build TEST=$(TEST) CHAPTER=$(CHAPTER) BASE=$(BASE)
+-	@echo Platform: $(BOARD)
+-	@cargo build $(MODE_ARG)
++	cargo build --release
+ 
+ clean:
+-	@cargo clean
+-
+-disasm: kernel
+-	@$(OBJDUMP) $(DISASM) $(KERNEL_ELF) | less
+-
+-disasm-vim: kernel
+-	@$(OBJDUMP) $(DISASM) $(KERNEL_ELF) > $(DISASM_TMP)
+-	@vim $(DISASM_TMP)
+-	@rm $(DISASM_TMP)
+-
+-run: run-inner
++	cargo clean
+ 
+-run-inner: build
+-	@qemu-system-riscv64 \
++run: kernel
++	timeout --foreground 300s qemu-system-riscv64 \
+ 		-machine virt \
+ 		-nographic \
+ 		-bios $(BOOTLOADER) \
+-		-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA)
+-
+-debug: build
+-	@tmux new-session -d \
+-		"qemu-system-riscv64 -machine virt -nographic -bios $(BOOTLOADER) -device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) -s -S" && \
+-		tmux split-window -h "riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'" && \
+-		tmux -2 attach-session -d
+-
+-gdbserver: build
+-	@qemu-system-riscv64 -machine virt -nographic -bios $(BOOTLOADER) -device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) -s -S
+-
+-gdbclient:
+-	@riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
++		-kernel $(KERNEL_ELF)
+ 
+-.PHONY: build env kernel clean disasm disasm-vim run-inner gdbserver gdbclient
++.PHONY: build kernel clean run
+diff --git a/os/build.rs b/os/build.rs
+index 63845c7..2eac708 100644
+--- a/os/build.rs
++++ b/os/build.rs
+@@ -1,20 +1,17 @@
+-//! Building applications linker
+-
+-use std::fs::{read_dir, File};
+ use std::io::{Result, Write};
++use std::fs::{File, read_dir};
+ 
+ fn main() {
+-    println!("cargo:rerun-if-changed=../user/src/");
++    println!("cargo:rerun-if-changed=../ci-user/user/src/");
+     println!("cargo:rerun-if-changed={}", TARGET_PATH);
+     insert_app_data().unwrap();
+ }
+ 
+-static TARGET_PATH: &str = "../user/build/elf/";
++static TARGET_PATH: &str = "../ci-user/user/build/elf/";
+ 
+-/// get app data and build linker
+ fn insert_app_data() -> Result<()> {
+     let mut f = File::create("src/link_app.S").unwrap();
+-    let mut apps: Vec<_> = read_dir("../user/build/elf/")
++    let mut apps: Vec<_> = read_dir("../ci-user/user/build/elf")
+         .unwrap()
+         .into_iter()
+         .map(|dir_entry| {
+@@ -25,36 +22,35 @@ fn insert_app_data() -> Result<()> {
+         .collect();
+     apps.sort();
+ 
+-    writeln!(
+-        f,
+-        r#"
++    writeln!(f, r#"
+     .align 3
+     .section .data
+     .global _num_app
+ _num_app:
+-    .quad {}"#,
+-        apps.len()
+-    )?;
++    .quad {}"#, apps.len())?;
+ 
+     for i in 0..apps.len() {
+         writeln!(f, r#"    .quad app_{}_start"#, i)?;
+     }
+     writeln!(f, r#"    .quad app_{}_end"#, apps.len() - 1)?;
+ 
++    writeln!(f, r#"
++    .global _app_names
++_app_names:"#)?;
++    for app in apps.iter() {
++        writeln!(f, r#"    .string "{}""#, app)?;
++    }
++
+     for (idx, app) in apps.iter().enumerate() {
+         println!("app_{}: {}", idx, app);
+-        writeln!(
+-            f,
+-            r#"
++        writeln!(f, r#"
+     .section .data
+     .global app_{0}_start
+     .global app_{0}_end
+     .align 3
+ app_{0}_start:
+     .incbin "{2}{1}.elf"
+-app_{0}_end:"#,
+-            idx, app, TARGET_PATH
+-        )?;
++app_{0}_end:"#, idx, app, TARGET_PATH)?;
+     }
+     Ok(())
+ }
+diff --git a/os/src/mm/memory_set.rs b/os/src/mm/memory_set.rs
+index 7a7b7ea..62d3578 100644
+--- a/os/src/mm/memory_set.rs
++++ b/os/src/mm/memory_set.rs
+@@ -57,12 +57,87 @@ impl MemorySet {
+         start_va: VirtAddr,
+         end_va: VirtAddr,
+         permission: MapPermission,
+-    ) {
++    ) -> Result<(), ()>{
++        if start_va > end_va {
++            return Err(())
++        }
++        if usize::from(start_va) % PAGE_SIZE != 0 {
++            return Err(())
++        }
++        for mapped_area in self.areas.iter() {
++            let start_vaddr = mapped_area.vpn_range.get_start().0 << 12;
++            let end_vaddr = mapped_area.vpn_range.get_end().0 << 12;
++            if !(start_va.0 >= end_vaddr || end_va.0 <= start_vaddr) {
++                return Err(())
++            }
++        }
+         self.push(
+             MapArea::new(start_va, end_va, MapType::Framed, permission),
+             None,
+         );
++        Ok(())
++    }
++    
++    /// ummap a piece of virtual address
++    pub fn unmap_area(&mut self, _start: VirtAddr, _len: usize) -> Result<(), ()> {
++        if usize::from(_start) % PAGE_SIZE != 0 {
++            return Err(());
++        }
++        let start_vpn = _start.floor();
++        let end_vpn = VirtAddr::from(usize::from(_start) + _len).ceil();
++        let mut deleted_areas = Vec::new();
++        // check if there is unmapped page need to be ummap
++        let capacity = end_vpn.0 - start_vpn.0;
++        let mut need_unmapped = Vec::new();
++        for _ in 0..capacity {
++            need_unmapped.push(false);
++        }
++        let _ = need_unmapped.iter_mut().map(|v| *v = false);
++        for area in self.areas.iter() {
++            let area_start_vpn = area.vpn_range.get_start();
++            let area_end_vpn = area.vpn_range.get_end();
++            if area_start_vpn >= start_vpn && area_end_vpn <= end_vpn {
++                for i in usize::from(area_start_vpn)..usize::from(area_end_vpn) {
++                    need_unmapped[i-start_vpn.0] = true;
++                }
++            } else if area_start_vpn >= start_vpn && area_start_vpn < end_vpn {
++                for i in area_start_vpn.0..end_vpn.0 {
++                    need_unmapped[i-start_vpn.0] = true;
++                }
++            } else if start_vpn < area_end_vpn && area_end_vpn <= end_vpn {
++                for i in start_vpn.0..area_end_vpn.0 {
++                    need_unmapped[i-start_vpn.0] = true;
++                }
++            }
++        }
++        for i in need_unmapped {
++            if i == false {
++                return Err(());
++            }
++        }
++        for (index, area) in self.areas.iter_mut().enumerate() {
++            let area_start_vpn = area.vpn_range.get_start();
++            let area_end_vpn = area.vpn_range.get_end();
++            if area_start_vpn >= start_vpn && area_end_vpn <= end_vpn {
++                area.unmap(&mut self.page_table);
++                deleted_areas.push(index);
++            } else if area_start_vpn >= start_vpn && area_start_vpn < end_vpn {
++                let mut new_start = end_vpn;
++                new_start.step();
++                area.shrink_to_start(&mut self.page_table, new_start);
++            } else if start_vpn < area_end_vpn && area_end_vpn <= end_vpn {
++                let mut new_end = start_vpn;
++                new_end.0 -= 1;
++                area.shrink_to(&mut self.page_table, new_end);
++            }
++        }
++        deleted_areas.reverse();
++        for index in deleted_areas {
++            self.areas.remove(index);
++        }
++        Ok(())
+     }
++
+     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
+         map_area.map(&mut self.page_table);
+         if let Some(data) = data {
+@@ -327,6 +402,17 @@ impl MapArea {
+         }
+         self.vpn_range = VPNRange::new(self.vpn_range.get_start(), new_end);
+     }
++
++    #[allow(unused)]
++    /// similar to the shrink_to function above
++    /// but this function shrink the front virtual address
++    pub fn shrink_to_start(&mut self, page_table: &mut PageTable, new_start: VirtPageNum) {
++        for vpn in VPNRange::new(self.vpn_range.get_start(), new_start) {
++            self.unmap_one(page_table, vpn);
++        }
++        self.vpn_range = VPNRange::new(new_start, self.vpn_range.get_end());
++    }
++
+     #[allow(unused)]
+     pub fn append_to(&mut self, page_table: &mut PageTable, new_end: VirtPageNum) {
+         for vpn in VPNRange::new(self.vpn_range.get_end(), new_end) {
+diff --git a/os/src/syscall/mod.rs b/os/src/syscall/mod.rs
+index 4a5297d..83050c0 100644
+--- a/os/src/syscall/mod.rs
++++ b/os/src/syscall/mod.rs
+@@ -26,12 +26,14 @@ const SYSCALL_MMAP: usize = 222;
+ const SYSCALL_TASK_INFO: usize = 410;
+ 
+ mod fs;
+-mod process;
++pub mod process;
+ 
+ use fs::*;
+ use process::*;
++use crate::task::update_syscall_times;
+ /// handle syscall exception with `syscall_id` and other arguments
+ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
++    update_syscall_times(syscall_id);
+     match syscall_id {
+         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
+         SYSCALL_EXIT => sys_exit(args[0] as i32),
+diff --git a/os/src/syscall/process.rs b/os/src/syscall/process.rs
+index e2f6662..b4d9f3e 100644
+--- a/os/src/syscall/process.rs
++++ b/os/src/syscall/process.rs
+@@ -1,27 +1,38 @@
+ //! Process management syscalls
++use core::mem::size_of;
++
++use crate::mm::{translated_byte_buffer, VirtAddr};
++
++use crate::timer::get_time_us;
+ use crate::{
+     config::MAX_SYSCALL_NUM,
+     task::{
+-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus,
++        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token,
+     },
+ };
+ 
++use crate::task::{map_a_piece_of_virtal_address, unmap_area, query_task_info};
++
+ #[repr(C)]
+ #[derive(Debug)]
++/// Timeval
+ pub struct TimeVal {
++    /// sec
+     pub sec: usize,
++    /// usec
+     pub usec: usize,
+ }
+ 
+ /// Task information
+ #[allow(dead_code)]
++#[derive(Debug)]
+ pub struct TaskInfo {
+     /// Task status in it's life cycle
+-    status: TaskStatus,
++    pub status: TaskStatus,
+     /// The numbers of syscall called by task
+-    syscall_times: [u32; MAX_SYSCALL_NUM],
++    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+     /// Total running time of task
+-    time: usize,
++    pub time: usize,
+ }
+ 
+ /// task exits and submit an exit code
+@@ -43,27 +54,62 @@ pub fn sys_yield() -> isize {
+ /// HINT: What if [`TimeVal`] is splitted by two pages ?
+ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+     trace!("kernel: sys_get_time");
+-    -1
++    // _ts is in the virtual address, so we can not modify
++    // it directly. we should translate it into kernel virtual
++    // address. And beacause kernel virtual address is eqaul to
++    // physical address, so we can use translated_byte_buffer 
++    let _ts_translated = translated_byte_buffer(current_user_token(), _ts as *mut u8, size_of::<TimeVal>());
++    let _trans_to_timeval = _ts_translated[0].as_ptr() as *mut u8 as *mut TimeVal;
++    let current_time = get_time_us();
++    unsafe {
++        *_trans_to_timeval = TimeVal {
++            sec: current_time / 1_000_000,
++            usec: current_time % 1_000_000,
++        }
++    };
++    0
+ }
+ 
+ /// YOUR JOB: Finish sys_task_info to pass testcases
+ /// HINT: You might reimplement it with virtual memory management.
+ /// HINT: What if [`TaskInfo`] is splitted by two pages ?
+ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+-    trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
+-    -1
++    trace!("kernel: sys_task_info!");
++    let _ti_translated = translated_byte_buffer(current_user_token(), _ti as *mut u8, size_of::<TaskInfo>());
++    let _trans_to_taskinfo = _ti_translated[0].as_ptr() as *mut TaskInfo;
++    let mut cur_task_info = TaskInfo {
++        status: TaskStatus::Running,
++        syscall_times: [0; MAX_SYSCALL_NUM],
++        time: 0,
++    };
++    query_task_info(&mut cur_task_info);
++    println!("time: {}", cur_task_info.time);
++    unsafe {
++        *_trans_to_taskinfo = TaskInfo {
++            ..cur_task_info
++        };
++    }
++    0
+ }
+ 
+-// YOUR JOB: Implement mmap.
++/// YOUR JOB: Implement mmap.
+ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
+-    -1
++    trace!("kernel: sys_mmap!");
++    let map_result = map_a_piece_of_virtal_address(VirtAddr::from(_start), _len, _port);
++    match map_result {
++        Ok(_) => 0,
++        Err(_) => -1,
++    }
+ }
+ 
+-// YOUR JOB: Implement munmap.
++/// YOUR JOB: Implement munmap.
+ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
+-    -1
++    trace!("kernel: sys_munmap!");
++    let unmap_result = unmap_area(VirtAddr::from(_start), _len);
++    match unmap_result {
++        Ok(_) => 0,
++        Err(_) => -1,
++    }
+ }
+ /// change data segment size
+ pub fn sys_sbrk(size: i32) -> isize {
+diff --git a/os/src/task/mod.rs b/os/src/task/mod.rs
+index a745df8..b99b7f9 100644
+--- a/os/src/task/mod.rs
++++ b/os/src/task/mod.rs
+@@ -24,6 +24,12 @@ pub use task::{TaskControlBlock, TaskStatus};
+ 
+ pub use context::TaskContext;
+ 
++use crate::mm::{VirtAddr, MapPermission};
++
++use crate::syscall::process::TaskInfo;
++
++use crate::timer::get_time_us;
++
+ /// The task manager, where all the tasks are managed.
+ ///
+ /// Functions implemented on `TaskManager` deals with all task state transitions
+@@ -80,6 +86,7 @@ impl TaskManager {
+         let next_task = &mut inner.tasks[0];
+         next_task.task_status = TaskStatus::Running;
+         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
++        next_task.first_schedule_time = get_time_us();
+         drop(inner);
+         let mut _unused = TaskContext::zero_init();
+         // before this, we should drop local variables that must be dropped manually
+@@ -143,6 +150,10 @@ impl TaskManager {
+             inner.current_task = next;
+             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
+             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
++            // update the first scheduled time
++            if inner.tasks[next].first_schedule_time == 0 {
++                inner.tasks[next].first_schedule_time = get_time_us();
++            }
+             drop(inner);
+             // before this, we should drop local variables that must be dropped manually
+             unsafe {
+@@ -153,6 +164,46 @@ impl TaskManager {
+             panic!("All applications completed!");
+         }
+     }
++
++    /// alloc a piece of virtual address, implemented in TaskManager
++    pub fn map_a_piece_of_virtal_address(&self ,start_va: VirtAddr, len: usize, port: usize) -> Result<(), ()>{
++        let mut inner = self.inner.exclusive_access();
++        let current = inner.current_task;
++        let mut permission = MapPermission::from_bits((port << 1) as u8).unwrap();
++        if permission.is_empty() || permission.contains(MapPermission::U){
++            return Err(())
++        }
++        permission = permission.union(MapPermission::U);
++        inner.tasks[current].memory_set.insert_framed_area(start_va, VirtAddr::from(usize::from(start_va) + len), permission)
++    }
++    fn query_task_info(&self, _ti: *mut TaskInfo) {
++        let inner = self.inner.exclusive_access();
++        let current_app_num = inner.current_task;
++        let current_status = inner.tasks[current_app_num].task_status;
++        let current_syscall_nums = inner.tasks[current_app_num].syscall_times.clone();
++        let first_scheduled_time = inner.tasks[current_app_num].first_schedule_time.clone();
++        println!("first schedule time: {}", first_scheduled_time);
++        unsafe {
++            let ti_ref = &mut *_ti;
++            ti_ref.status = current_status;
++            ti_ref.syscall_times = current_syscall_nums;
++            ti_ref.time = (get_time_us() - first_scheduled_time) / 1_000;
++        }
++    }
++    /// update syscall time once
++    fn update_syscall_times(&self, syscall_id: usize) {
++        let mut inner = self.inner.exclusive_access();
++        let current_app_num = inner.current_task;
++        inner.tasks[current_app_num].syscall_times[syscall_id] += 1;
++        inner.tasks[current_app_num].last_syscall_time = get_time_us();
++    }
++
++    ///
++    pub fn ummap_area(&self, start_va: VirtAddr, len: usize) -> Result<(), ()> {
++        let mut inner = self.inner.exclusive_access();
++        let current = inner.current_task;
++        inner.tasks[current].memory_set.unmap_area(start_va, len)
++    }
+ }
+ 
+ /// Run the first task in task list.
+@@ -202,3 +253,26 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
+ pub fn change_program_brk(size: i32) -> Option<usize> {
+     TASK_MANAGER.change_current_program_brk(size)
+ }
++
++/// For syscall map, this func will map a piece of virtual address
++/// for current running process
++/// The param of this func is start virtual address, length of alloc 
++/// virtual address, and permisson
++pub fn map_a_piece_of_virtal_address(start_va: VirtAddr, len: usize, port: usize) -> Result<(), ()> {
++    TASK_MANAGER.map_a_piece_of_virtal_address(start_va, len, port)
++}
++
++///
++pub fn unmap_area(start_va: VirtAddr, len: usize) -> Result<(), ()> {
++    TASK_MANAGER.ummap_area(start_va, len)
++}
++
++/// query_task_info
++pub fn query_task_info(_ti: *mut TaskInfo) {
++    TASK_MANAGER.query_task_info(_ti);
++}
++
++/// update syscall times
++pub fn update_syscall_times(syscall_id: usize) {
++    TASK_MANAGER.update_syscall_times(syscall_id);
++}
+\ No newline at end of file
+diff --git a/os/src/task/task.rs b/os/src/task/task.rs
+index dce6981..f6939b9 100644
+--- a/os/src/task/task.rs
++++ b/os/src/task/task.rs
+@@ -5,6 +5,7 @@ use crate::mm::{
+     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
+ };
+ use crate::trap::{trap_handler, TrapContext};
++use crate::config::MAX_SYSCALL_NUM;
+ 
+ /// The task control block (TCB) of a task.
+ pub struct TaskControlBlock {
+@@ -28,6 +29,13 @@ pub struct TaskControlBlock {
+ 
+     /// Program break
+     pub program_brk: usize,
++
++    /// The syscall times
++    pub syscall_times: [u32; MAX_SYSCALL_NUM],
++    /// Last syscall time
++    pub last_syscall_time: usize,
++    /// The task first scheduled time
++    pub first_schedule_time: usize,
+ }
+ 
+ impl TaskControlBlock {
+@@ -54,7 +62,7 @@ impl TaskControlBlock {
+             kernel_stack_bottom.into(),
+             kernel_stack_top.into(),
+             MapPermission::R | MapPermission::W,
+-        );
++        ).unwrap();
+         let task_control_block = Self {
+             task_status,
+             task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+@@ -63,6 +71,9 @@ impl TaskControlBlock {
+             base_size: user_sp,
+             heap_bottom: user_sp,
+             program_brk: user_sp,
++            syscall_times: [0; MAX_SYSCALL_NUM],
++            last_syscall_time: 0,
++            first_schedule_time: 0,
+         };
+         // prepare TrapContext in user space
+         let trap_cx = task_control_block.get_trap_cx();
+@@ -98,7 +109,7 @@ impl TaskControlBlock {
+     }
+ }
+ 
+-#[derive(Copy, Clone, PartialEq)]
++#[derive(Copy, Clone, PartialEq, Debug)]
+ /// task status: UnInit, Ready, Running, Exited
+ pub enum TaskStatus {
+     /// uninitialized
+diff --git a/reports/lab1.md b/reports/lab1.md
+new file mode 100644
+index 0000000..e69de29
+diff --git a/reports/lab2.md b/reports/lab2.md
+new file mode 100644
+index 0000000..e69de29
+diff --git a/user b/user
+new file mode 160000
+index 0000000..1163ee6
+--- /dev/null
++++ b/user
+@@ -0,0 +1 @@
++Subproject commit 1163ee6e2ca11184b01d2f376f97c42288349c23

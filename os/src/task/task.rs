@@ -44,6 +44,12 @@ impl TaskControlBlock {
         permission = permission.union(MapPermission::U);
         inner.memory_set.insert_framed_area(start_va, VirtAddr::from(usize::from(start_va) + len), permission)
     }
+
+    ///
+    pub fn ummap_area(&self, start_va: VirtAddr, len: usize) -> Result<(), ()> {
+        let mut inner = self.inner.exclusive_access();
+        inner.memory_set.unmap_area(start_va, len)
+    }
 }
 
 pub struct TaskControlBlockInner {
